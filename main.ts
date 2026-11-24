@@ -26,7 +26,7 @@
 // Deterministic by construction: no clock, no environment, no randomness;
 // iteration only over insertion-ordered maps fed by the batch stream.
 
-import { runBot, LAMPORTS_PER_SOL, type Batch, type BotState, type OrderInput, type Pubkey } from './vendor/makefun-bot.ts';
+import { runBot, type Batch, type BotState, type OrderInput, type Pubkey } from './vendor/makefun-bot.ts';
 
 const LAMPORTS = 1e9;
 const CURVE_FEE = 0.0125; // protocol 95 bps + creator 30 bps, charged on curve trades
@@ -94,6 +94,37 @@ function sellValueSol(tokens: bigint, vq: bigint, vt: bigint, txFeeSol: number):
   const t = Number(tokens);
   const out = (t * Number(vq)) / (Number(vt) + t) / LAMPORTS;
   return out * (1 - CURVE_FEE) - txFeeSol;
+}
+
+// --- per-run books, created once (must sit above runBot: top-level await
+// runs before any declaration below it) ---
+interface Books {
+  tapes: Map<Pubkey, Tape>;
+  held: Map<Pubkey, Held>;
+  probes: Map<Pubkey, boolean>;
+  entered: Set<Pubkey>;
+  myFills: number;
+  myCoins: Set<Pubkey>;
+  firstTime: number | null;
+  lastTime: number | null;
+}
+
+let BOOKS: Books | null = null;
+
+function getBooks(): Books {
+  if (BOOKS === null) {
+    BOOKS = {
+      tapes: new Map(),
+      held: new Map(),
+      probes: new Map(),
+      entered: new Set(),
+      myFills: 0,
+      myCoins: new Set(),
+      firstTime: null,
+      lastTime: null,
+    };
+  }
+  return BOOKS;
 }
 
 await runBot({
@@ -312,33 +343,3 @@ await runBot({
     return orders;
   },
 });
-
-// --- module-level books, created once per run ---
-interface Books {
-  tapes: Map<Pubkey, Tape>;
-  held: Map<Pubkey, Held>;
-  probes: Map<Pubkey, boolean>;
-  entered: Set<Pubkey>;
-  myFills: number;
-  myCoins: Set<Pubkey>;
-  firstTime: number | null;
-  lastTime: number | null;
-}
-
-let BOOKS: Books | null = null;
-
-function getBooks(): Books {
-  if (BOOKS === null) {
-    BOOKS = {
-      tapes: new Map(),
-      held: new Map(),
-      probes: new Map(),
-      entered: new Set(),
-      myFills: 0,
-      myCoins: new Set(),
-      firstTime: null,
-      lastTime: null,
-    };
-  }
-  return BOOKS;
-}
