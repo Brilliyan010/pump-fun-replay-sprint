@@ -21,6 +21,70 @@ Competition: `u-jackxyz72-pump-fun-replay-sprint-paper-bot-0b809122`
   (Note: the server grades on Node v26.13.1 in Docker, this machine runs
   v24.22.1, so the server's result hash will differ.)
 
+## Ticket-1 rejection — timeout diagnosis (25 Nov 2026)
+
+Ticket-1 (submission `01a20c3c-b4a6-7787-8aad-a071425e8417`) was REJECTED by the
+server in round 1: the only failing check was `run_completes` — "The latest
+grade run on the dev phase ended timeout." Every other check PASSED. Server
+limits: wall budget 1800 s, 1 CPU, 1024 MB, 64 pids.
+
+**Cause found: the OLD kit (level 40), not the bot.** The old kit shipped
+harness `harness@1adec795` / scorer `scorer@c4f67f9f`. The NEW kit (level 3)
+ships harness `harness@c62b0ab7dd3f8c0410c8b3e90da98acb5fa7d898d1a3019dfd35d7425c924ed0`
+(node v26.13.1) / scorer `scorer@26f98e34b4f52a6a2397ca67a70991ab647397739e33e0d77f1ad00b3fc97cda`.
+The dataset did NOT change (`dataset_sha256`
+`b661ceee26070f1f07eced009b43dda699e1e96d40a6724c7e72273b1e3715a9`;
+`bundle_sha256`
+`405e82a96403dd30ea71aa83727ba3d5a8103de4c96cf75052ed29598e2528d7` — same as
+the old kit). Re-grading the unchanged repo (HEAD `1232d72`) with the new
+kit completes cleanly every time.
+
+**Grade-local runs with the new kit (process driver, `--json`, all exit 0,
+status `finished`, error `null`, `l1.reproduced: true`):**
+
+| run | constraint | wall time |
+|---|---|---|
+| 1 | `taskset -c 0` (1 CPU) | 100 s |
+| 2 | `systemd-run` scope, MemoryMax=1024M + CPUQuota=100% (server-like caps) | 56 s |
+| 3 | `taskset -c 0` + bot-process monitor | 66 s |
+| 4 | reviser verification run, plain process driver | 43 s |
+
+All four runs returned IDENTICAL results. The bot is nowhere near the
+server limits: in the monitored run (run 3) the bot itself used only
+**11 s CPU total** (two runs: 6 s + 5 s) and **peak RSS 124–137 MB**,
+against a budget of 1800 s wall / 1024 MB. Whole grade-local finishes in
+~1 minute even under server-like caps — the timeout cannot have come from
+this bot.
+
+**Hashes (new kit):**
+- action_log_sha256 `c4c0258feddef79ba239739c4b8f17a16bf76b56de001f9a35a6eb039250644f`
+  — UNCHANGED from the old kit (byte-identical bot behaviour)
+- result_sha256 `89290e23b084c9d1e96fdf33fcb63191c1412ed665c9be0f2daf549990d27218`
+  — changed from the old kit's `0243d378...` because the harness/scorer
+  versions changed; expected, not a bot change.
+
+**Score UNCHANGED: net PnL +0.004933073 SOL (4,933,073 lamports), 133 fills,
+45 round trips** — same as the dev score above.
+
+**Static check (25 Nov 2026, reviser):** `main.ts` `onBatch` makes single
+passes over `batch.fills` / `batch.events` / `held` (≤ 5 positions) /
+`pending` / `traded` (per-batch set); `batch.marks.find(...)` runs only
+inside the held-positions loop (≤ 5 × marks-per-batch). `BotState.applyBatch`
+in `vendor/makefun-bot.ts` is a single linear pass over fills, marks and
+events with O(1) Map lookups. No dataset loading, no clock/env/randomness,
+no loop over all tapes/curves — no material O(n²) hot spot anywhere. All
+loops are linear in the 128,058 events / 63,369 slots of the replay.
+
+**Decision: NO code or strategy change.** Nothing needs optimising — the
+bot uses 11 s CPU of an 1800 s budget — and any edit would only risk
+breaking the byte-identical determinism and the verified score above for
+zero benefit. **The only change since ticket-1 is this NOTES.md file.**
+One mismatch remains and is out of our control: local Node is v24.22.1
+while the server grades on Node v26.13.1 (Docker is not available on this
+VM, so the grade-local runs used the process driver); the server's
+`result_sha256` will therefore differ, but the `action_log_sha256` should
+match.
+
 ## Stress test (20 block surrogates of the dev window)
 
 - Median −0.04 SOL, p10 −0.08, p90 −0.01 SOL; **18 of 20 copies lost
